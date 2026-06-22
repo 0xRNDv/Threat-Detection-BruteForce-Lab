@@ -11,188 +11,186 @@ Before beginning the investigation, the challenge files were provided in a compr
 ```bash
 # Extracting the lab files using 7z
 7z x ChallengeFile.7z -o./BruteForce_Lab
+```
+
 🔍 Investigation Tasks
+---
 
-Task 1: Identifying the Target Server IP
-Question: What is the IP address of the server targeted by the attacker's brute-force attack?
+**Task 1**: Identifying the Target Server IP
 
-Analysis & Methodology
+**Question: What is the IP address of the server targeted by the attacker's brute-force attack?**
+
+**Analysis & Methodology**
 To locate the target server, I analyzed the network traffic statistics within Wireshark by navigating to Statistics -> Conversations -> TCP.
 
 By examining the connection frequencies and data volumes, a significant pattern emerged involving two primary hosts: 192.168.190.137 (Attacker) and 51.116.96.181 (Target). The host 192.168.190.137 initiated an anomalous number of parallel TCP connections across multiple source ports targeted at a single destination IP address. This behavior is indicative of automated scanning and brute-force traffic.
 
-![the answer](./Screenshots/wireshark_conversations.png)
-Answer: 51.116.96.181
+![Wireshark TCP Conversations](./Screenshots/wireshark_conversations.png)
+***Figure 1**: Analyzing TCP conversations to identify the anomaly and target IP.*
 
-Task 2: Investigating Web-Based Brute-Force Activity
-Question: Which directory/file was targeted by the attacker's brute-force attempt?
+**Answer:** 51.116.96.181
 
-Analysis & Methodology
+---
+
+**Task 2**: Investigating Web-Based Brute-Force Activity
+
+**Question: Which directory/file was targeted by the attacker's brute-force attempt?**
+
+**Analysis & Methodology**
 To investigate potential web application attacks, I analyzed the HTTP traffic inside Wireshark by applying the protocol filter: http.
 
-The packet capture revealed a dense stream of repetitive HTTP POST requests originating from the attacker's machine and directed toward the target web server. Looking closely at the Info column and the Hypertext Transfer Protocol breakdown (specifically frame 20947), the attacker was targeting the local directory file /index.php.
+**Solution Steps**
 
-Further inspection of the HTML Form URL Encoded data within the packet details showed that these POST requests were automated login attempts transmitting credential payloads (e.g., username=t3m0&password=TestTest). This confirms that the web application's main index page was subjected to an aggressive credential-stuffing or brute-force campaign.
+**Step 1: Filtering HTTP Traffic** Applied the specific protocol filter `http` inside Wireshark to isolate all web application traffic and filter out noise from other network layers.
 
-Answer: index.php
+**Step 2: Analyzing Request Patterns** The packet capture revealed an anomalous, dense stream of repetitive HTTP POST requests originating from the attacker's machine (`192.168.190.137`) and directed toward the target web server.
 
-Task 3: Identifying Compromised Credentials
-Question: Identify the correct username and password combination used for a successful login.
+**Step 3: Inspecting Payload Details & Target File** By examining the packet details (specifically Frame 20947), the target was identified as the local directory file `/index.php`. Further inspection of the "HTML Form URL Encoded" section exposed automated login payloads transmitting credentials (e.g., `username=t3m0&password=TestTest`), confirming an aggressive web brute-force campaign.
 
-Solution Steps
+![HTTP targeted file](./Screenshots/file_targeted.png)
+***Figure 2**: Wireshark capture showing consecutive HTTP POST requests targeting /index.php.*
 
-Step 1: Identifying the Success Indicator
-Instead of manually shifting through thousands of failed HTTP POST requests, the analysis was streamlined by searching for the server's success response within the HTML body.
-Using Wireshark's Find Packet feature (Ctrl + F):
+**Answer**: index.php
 
-Search Type: String
+---
 
-Search In: Packet details
+**Task 3**: Identifying Compromised Credentials
 
-Search Term: >Correct</p> (The specific green HTML success message rendered by the application upon successful authentication).
+**Question: Identify the correct username and password combination used for a successful login.**
 
-Step 2: Locating the Successful HTTP Response
-The search led directly to Frame 22249:
+**Analysis & Methodology**
+To efficiently locate the compromised credentials without scanning thousands of failed attempts, I targeted specific HTTP status success indicators rendered by the web application.
 
-Protocol: HTTP
+**Solution Steps**
 
-Status: HTTP/1.1 200 OK
+**Step 1: Configuring the Search Indicator** Opened Wireshark's Find Packet tool (`Ctrl + F`), setting the Search Type to `String` and searching within `Packet details`. 
 
-Payload Contains: <p style='color: green;'>Correct</p> inside the response body.
+**Step 2: Hunting the Success Criteria** Used the search term `>Correct</p>` to isolate the exact HTML green success message rendered upon valid authentication.
 
-Step 3: Extracting the Credentials
-By tracing the associated HTTP POST request in Frame 22247 (linked via [Response in frame: 22249]), the raw URL-encoded form data was exposed:
+**Step 3: Locating the Frame** The search instantly pinpointed **Frame 22249** (`HTTP/1.1 200 OK`) containing the success payload in its response body.
 
-Target URL: http://51.116.96.181/index.php
+**Step 4: Extracting Credentials** Traced the associated HTTP POST request in **Frame 22247** (linked via response metadata) to expose the raw URL-encoded form data.
 
-Form Data Found:
+![Successful HTTP Response Credentials](./Screenshots/response.png)
+***Figure 3**: Identification of successful web authentication and credential extraction.*
 
-Form item: "username" = "web-hacker"
+![Successful HTTP request Credentials](./Screenshots/request.png)
+***Figure 4**: Identification of successful web authentication and credential extraction.*
 
-Form item: "password" = "admin12345"
+**Answer:** `web-hacker:admin12345`
 
-Answer: web-hacker:admin12345
+---
 
-Task 4: Evaluating RDP Target Scope
-Question: Determine how many unique user accounts the attacker attempted to compromise via RDP brute-force.
+**Task 4**: Evaluating RDP Target Scope
 
-Solution Steps
+**Question: Determine how many unique user accounts the attacker attempted to compromise via RDP brute-force.**
 
-Step 1: Tracking RDP Connection Attempts
-By applying a network filter on the RDP protocol (tcp.port == 3389), we can intercept the RDP connection cookies (mstshash) initiated by the attacker. This initial sweep revealed a broad list of potential target names transmitted inside the packet capture (.pcap).
+**Analysis & Methodology**
+I isolated the RDP handshake layer to extract specific session attributes and cross-referenced them with local authentication logs to identify unique targeting vectors.
 
-Step 2: Cross-Referencing Logs and Cross-Matching Names
-To isolate the exact number of accounts targeted exclusively via RDP, a cross-match analysis was performed against the Linux host logs (auth.log):
+**Solution Steps**
 
-Accounts such as mmox and web-hacker were heavily logged inside auth.log due to persistent, successful SSH/local logins, meaning they were active system accounts or part of a separate SSH/Web attack vector.
+**Step 1: Intercepting RDP Traffic** Applied the network filter `tcp.port == 3389` to trap RDP connection cookies (`mstshash`) containing the target account names transmitted in the `.pcap` capture.
 
-On the other hand, names unique to the RDP traffic (like Mohamed, Mohsen, and Ali) never showed up in the Linux authentication logs because their attempts were strictly bounded to the RDP network layer.
+**Step 2: Cross-Matching against Local Logs** Cross-referenced the captured names against the Linux host's `auth.log`. Active system accounts (like `mmox` and `web-hacker`) were filtered out as they belonged to separate SSH/Web attack vectors.
 
-By filtering out the non-RDP related accounts and cross-matching the unique target sessions active over port 3389, the final count of unique user accounts targeted by the RDP brute-force attack is exactly 7.
+**Step 3: Isolating RDP-Exclusive Sessions** Isolated accounts strictly bounded to port 3389 (such as `Mohamed`, `Mohsen`, and `Ali`) which never appeared in local system authentication logs.
 
-Answer: 7
+![RDP Account Analysis](./Screenshots/rdp_analysis.png)
+***Figure 5**: Cross-referencing active RDP connection cookies against system logs.*
 
-Task 5: Identifying the Attacker's Machine (clientName)
-Question: Find the explicit "clientName" of the attacker's machine used during the RDP connection attempts.
+**Answer:** `7`
 
-Solution Steps
+---
 
-Step 1: Filtering for RDP Client Data
-During an RDP connection handshake, the client machine transmits its local system metadata (such as hostname, keyboard layout, and display resolution) to the target server inside a specific data structure called clientCoreData.
-To locate this information efficiently within Wireshark, the main RDP port traffic was isolated, and a specific string search was conducted:
+**Task 5**: Identifying the Attacker's Machine (clientName)
 
-Display Filter: tcp.port == 3389
+**Question: Find the explicit "clientName" of the attacker's machine used during the RDP connection attempts.**
 
-Search Feature (Ctrl + F):
+**Analysis & Methodology**
+During RDP handshakes, the client system transmits local workstation metadata inside the `clientCoreData` structure. I audited this layer to find the attacker's persistent hostname.
 
-Search Type: String
+**Solution Steps**
 
-Search In: Packet details
+**Step 1: Filtering Handshake Metadata** Applied the filter `tcp.port == 3389` and used the Find Packet tool (`Ctrl + F`) to run a `String` search inside `Packet details` for the keyword `clientname`.
 
-Search Term: clientname
+**Step 2: Extracting Workstation Properties** The search located **Frame 23** (`Protocol: RDP / Info: ClientData`). Expanding the packet tree node `Remote Desktop Protocol` -> `clientCoreData` exposed the decoded client properties.
 
-Step 2: Extracting the Hostname Metadata
-The search feature pointed directly to Frame 23 (Protocol: RDP / Info: ClientData):
-Expanding the packet details tree reveals the underlying layers: Remote Desktop Protocol -> clientCoreData.
-Inside the parsed core attributes, the server successfully decoded the attacker's local workstation name parameter:
+![Attacker Client Name Metadata](./Screenshots/attacker_client.png)
+***Figure 6**: Extracting the attacker's workstation hostname from the RDP clientCoreData structure.*
 
-Parameter: clientName
+**Answer:** `t3m0-virtual-ma`
 
-Value: t3m0-virtual-ma
+---
 
-Answer: t3m0-virtual-ma
+**Task 6**: SSH Last Successful Login Analysis
 
-Task 6: SSH Last Successful Login Analysis
-Question: Identify the user who last successfully logged in via SSH and the exact timestamp of the event.
+**Question: Identify the user who last successfully logged in via SSH and the exact timestamp of the event.**
 
-Solution Steps
+**Analysis & Methodology**
+Linux security subsystems append authentication milestones chronologically to the local log file. I isolated the latest state entry indicating verified interactive SSH access.
 
-Step 1: Filtering the Linux Authentication Logs
-The Linux authentication log file (auth.log) natively records all system login activities. To track down successful interactive sessions over SSH, we look for the system keyword Accepted.
-Using the Linux terminal, a targeted string isolation was performed on the log file:
+**Solution Steps**
+**Step 1: Isolating Approved Sessions** Executed a targeted string isolation on the log file via the Linux terminal to filter for verified access milestones:
+  ```bash
+  cat auth.log | grep -i "Accepted"
+  ```
+**Step 2: Parsing Chronological State** Navigated to the bottom-most line of the generated output (representing the most recent historical event) to extract the final recorded session parameters:
 
-Bash
-cat auth.log | grep -i "Accepted"
-Step 2: Parsing the Timestamps and User Sessions
-The command output produced a historical log list of successful logins. Since the log entries are appended sequentially over time (chronological order), the very last line of the output represents the latest chronological event.
-Navigating to the bottom-most log entry reveals the final recorded session:
+![Last Succeful Login](./Screenshots/accepted_password.png)
+***Figure 7**: Parsing auth.log for verified SSH interactive authentication timestamps.*
 
-Plaintext
-Feb 25 11:43:54 chall sshd[981]: Accepted password for mmox from 41.38.160.33 port 54464 ssh2
-Extracting the required parameters from this specific line:
+**Answer:** mmox:11:43:54
 
-Username: mmox
+---
 
-Timestamp: 11:43:54 (HH:MM:SS)
+**Task 7**: Counting Unsuccessful SSH Connection Attempts
 
-Answer: mmox:11:43:54
+**Question: Determine the total number of unsuccessful SSH connection attempts made by the attacker against the system.**
 
-Task 7: Counting Unsuccessful SSH Connection Attempts
-Question: Determine the total number of unsuccessful SSH connection attempts made by the attacker against the system.
+**Analysis & Methodology**
+The Secure Shell Daemon (sshd) logs every single rejected password phase under a standard explicit error format. I used an industrial log parsing pipeline to count these entries.
 
-Solution Steps
+**Solution Steps**
 
-Step 1: Crafting the Log Query
-Linux systems log every failed SSH authentication milestone into /var/log/auth.log under distinct patterns generated by the SSH daemon (sshd). When an attacker performs a password brute-force attack, each incorrect guess generates an explicit entry stating Failed password for.
-To accurately count these events, we combine text filtering tools (grep) with a word/line counting utility (wc) via the Linux terminal:
+**Step 1**: Building the Log Pipeline Crafted a piped command utility to filter out extraneous system telemetry and isolate failed credential events:
 
-Bash
+```bash
 cat auth.log | grep -i "sshd" | grep -i "failed password for" | wc -l
-Step 2: Analyzing the Command Breakdown
+```
 
-cat auth.log: Reads and streams the entire authentication log file.
+**Step 2: Processing the Filters**
+```bash
+cat auth.log: Streams the raw system authentication logs.
 
-grep -i "sshd": Isolates traffic specifically belonging to the Secure Shell Daemon process.
+grep -i "sshd": Focuses solely on the SSH daemon tracking.
 
-grep -i "failed password for": Filters out noise and matches only the explicit rows where a password attempt was rejected.
+grep -i "failed password for": Isolates rows where a password attempt was explicitly rejected.
 
-wc -l: Counts the total number of lines returned after passing through the filters.
+wc -l: Counts the matching line variables to determine the metric score.
+```
+![Unsuccessful SSH Connection](./Screenshots/failed_password.png)
 
-Step 3: Extracting the Metric
-Executing the piped command instantly parses the records and returns the total line count:
+***Figure 8:** Executing log parsing strings to determine total rejected authentication attempts.*
 
-Output Result: 7480
+**Answer:** 7480
 
-Answer: 7480
+---
 
-Task 8: Mapping to MITRE ATT&CK Framework
-Question: Identify the specific MITRE ATT&CK technique ID used by the attacker to gain initial access to the system.
+**Task 8:** Mapping to MITRE ATT&CK Framework
 
-Solution Steps
+**Question: Identify the specific MITRE ATT&CK technique ID used by the attacker to gain initial access to the system.**
 
-Step 1: Analyzing Attack Patterns
-Throughout the forensic investigation of both the packet capture (BruteForce.pcap) and system logs (auth.log), a consistent and automated pattern was observed:
+**Analysis & Methodology**
+By compiling the tactical markers gathered across the forensic evidence—including 7,480 failed SSH logs, parallel RDP sweeping, and automated web POST patterns—I mapped the adversarial actions to standardized framework profiles.
 
-Over 7,480 failed password attempts directed at the SSH service.
+**Solution Steps**
 
-Multiple parallel connection sweeps targeted at the web interface and RDP services using extensive lists of usernames and potential passwords.
-This systematic guessing of credentials to force entry into legitimate accounts is classified universally under credential stuffing or brute-forcing.
+**Step 1:** Classifying Adversarial Behavior The systematic cycling through automated credential sheets or stuffing combinations across various network services is universally classified as brute-forcing.
 
-Step 2: Mapping to MITRE ATT&CK Matrix
-According to the MITRE ATT&CK Framework, tactics that involve an adversarial attempt to access accounts by systematically cycling through passwords fall under the Initial Access or Credential Access tactics:
+**Step 2:** Attributing Framework Identifiers Mapped the attack pattern to the Initial Access and Credential Access tactics within the MITRE ATT&CK Matrix.
 
-Main Technique: Brute Force
+![MITRE ATT&CK Framework](./Screenshots/MITRE_ATT&CK.png)
+***Figure 9:** Mapping observed telemetry to the MITRE ATT&CK Matrix technique ID.*
 
-MITRE ID: T1110
-
-Answer: T1110
+**Answer: T1110**
