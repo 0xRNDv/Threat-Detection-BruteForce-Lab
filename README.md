@@ -1,4 +1,4 @@
-# LetsDefend — Brute Force Attacks Challenge Walkthrough
+# LetsDefend — Brute Force Attacks Challenge
 
 ## 📝 Executive Summary
 This report documents the digital forensics and investigation of a brute-force attack campaign directed against a corporate web server and system infrastructure. By analyzing network packet captures (`BruteForce.pcap`) and system authentication records (`auth.log`), the investigation traces the attacker's footprints across different layers, uncovering the target server, web-based brute-force metrics, RDP reconnaissance, and the compromised credentials.
